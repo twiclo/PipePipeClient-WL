@@ -12,9 +12,17 @@ def signingKeyAlias = System.getenv("KEY_ALIAS")
 def signingKeyPassword = System.getenv("KEY_PASSWORD")
 def baseVersionCode = 1110
 def appVersionName = "5.5.0"
+def wlBuildNumber = System.getenv("WL_BUILD_NUMBER")?.toInteger()
+if (wlBuildNumber != null && (wlBuildNumber < 1 || wlBuildNumber > 999)) {
+    throw new GradleException("WL_BUILD_NUMBER must be between 1 and 999")
+}
+def buildVersionCode = wlBuildNumber == null
+        ? baseVersionCode : baseVersionCode * 1000 + wlBuildNumber
+def buildVersionName = wlBuildNumber == null
+        ? appVersionName : "${appVersionName}-wl.${wlBuildNumber}"
 def abiCodes = ['armeabi-v7a': 1, 'x86': 2, 'x86_64': 3, 'arm64-v8a': 4]
 def stableBuildConfigVersionCode =
-        (100 * baseVersionCode) + abiCodes['armeabi-v7a']
+        (100 * buildVersionCode) + abiCodes['armeabi-v7a']
 
 android {
     compileSdk 37
@@ -24,8 +32,8 @@ android {
         minSdk 23
         //noinspection OldTargetApi,ExpiredTargetSdkVersion
         targetSdk 36
-        versionCode baseVersionCode
-        versionName appVersionName
+        versionCode buildVersionCode
+        versionName buildVersionName
         multiDexEnabled true
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
@@ -79,7 +87,8 @@ android {
             }
             if (System.properties.containsKey('packageSuffix')) {
                 applicationIdSuffix System.getProperty('packageSuffix')
-                resValue "string", "app_name", "PipePipe " + System.getProperty('packageSuffix')
+                resValue "string", "app_name", System.getProperty('packageSuffix') == '.wl'
+                        ? "PipePipe WL" : "PipePipe " + System.getProperty('packageSuffix')
             } else {
                 resValue "string", "app_name", "PipePipe"
             }
@@ -150,13 +159,13 @@ androidComponents.onVariants(androidComponents.selector().all()) { variant ->
     variant.outputs.each { output ->
         def outputFileName = output.outputFileName.get()
         def abi = abiCodes.keySet().sort { -it.length() }.find { outputFileName.contains(it) }
-        def versionCode = 100 * baseVersionCode
+        def versionCode = 100 * buildVersionCode
         if (abi != null) {
             versionCode += abiCodes[abi]
         }
         output.versionCode.set(versionCode)
         output.outputFileName.set(
-                "PipePipe_${appVersionName}-${abi ?: 'universal'}-${variant.name}.apk")
+                "PipePipe_${buildVersionName}-${abi ?: 'universal'}-${variant.name}.apk")
     }
 }
 

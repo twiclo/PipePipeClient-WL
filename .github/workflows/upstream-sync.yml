@@ -1,0 +1,52 @@
+name: Propose upstream client updates
+
+on:
+  schedule:
+    - cron: '17 8 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: upstream-client-sync
+  cancel-in-progress: false
+
+jobs:
+  propose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge new upstream commits
+        id: merge
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git remote add upstream https://github.com/InfinityLoop1308/PipePipeClient.git
+          git fetch upstream dev
+          if git merge-base --is-ancestor upstream/dev HEAD; then
+            echo 'changed=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git switch -C sync/upstream-dev
+          git merge --no-edit upstream/dev
+          echo 'changed=true' >> "$GITHUB_OUTPUT"
+
+      - name: Push proposal branch
+        if: steps.merge.outputs.changed == 'true'
+        run: git push --force origin HEAD:refs/heads/sync/upstream-dev
+
+      - name: Open review pull request
+        if: steps.merge.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$(gh pr list --head sync/upstream-dev --base dev --state open --json number --jq 'length')" = 0 ]; then
+            gh pr create --head sync/upstream-dev --base dev \
+              --title 'Merge upstream PipePipeClient changes' \
+              --body 'Review the upstream merge before updating the Watch Later client. If the merge conflicts, this workflow fails without changing the fork.'
+          fi
