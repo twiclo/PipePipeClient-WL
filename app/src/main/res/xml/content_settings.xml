@@ -33,6 +33,14 @@
         app:singleLineTitle="false"
         app:iconSpaceReserved="false" />
 
+    <EditTextPreference
+        android:key="@string/watch_later_url_key"
+        android:title="@string/watch_later_url_title"
+        android:summary="@string/watch_later_url_summary"
+        android:inputType="textUri"
+        app:singleLineTitle="false"
+        app:iconSpaceReserved="false" />
+
     <PreferenceScreen
         android:fragment="org.schabi.newpipe.settings.PeertubeInstanceListFragment"
         android:key="@string/peertube_instance_setup_key"

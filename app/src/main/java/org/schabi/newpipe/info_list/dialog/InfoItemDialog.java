@@ -9,6 +9,7 @@ import android.os.Build;
 import android.util.Log;
 import android.view.View;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
@@ -28,10 +29,18 @@ import org.schabi.newpipe.extractor.stream.StreamInfoItem;
 import org.schabi.newpipe.extractor.stream.StreamType;
 import org.schabi.newpipe.player.helper.PlayerHolder;
 import org.schabi.newpipe.util.external_communication.KoreUtils;
+import org.schabi.newpipe.watchlater.WatchLaterClient;
+import org.schabi.newpipe.watchlater.WatchLaterFragment;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Stream;
+
+import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers;
+import io.reactivex.rxjava3.core.Completable;
+import io.reactivex.rxjava3.core.Single;
+import io.reactivex.rxjava3.schedulers.Schedulers;
 
 /**
  * Dialog for a {@link StreamInfoItem}.
@@ -40,19 +49,87 @@ import java.util.stream.Stream;
  */
 public final class InfoItemDialog {
     private static final String TAG = Build.class.getSimpleName();
-    /**
-     * Ideally, {@link InfoItemDialog} would extend {@link AlertDialog}.
-     * However, extending {@link AlertDialog} requires many additional lines
-     * and brings more complexity to this class, especially the constructor.
-     * To circumvent this, an {@link AlertDialog.Builder} is used in the constructor.
-     * Its result is stored in this class variable to allow access via the {@link #show()} method.
-     */
-    private final AlertDialog dialog;
+    private final Activity activity;
+    private final Fragment fragment;
+    private final StreamInfoItem info;
+    private final List<StreamDialogEntry> entries;
 
     private InfoItemDialog(@NonNull final Activity activity,
                            @NonNull final Fragment fragment,
                            @NonNull final StreamInfoItem info,
                            @NonNull final List<StreamDialogEntry> entries) {
+        this.activity = activity;
+        this.fragment = fragment;
+        this.info = info;
+        this.entries = entries;
+    }
+
+    public void show() {
+        if (!WatchLaterClient.isConfigured(activity)) {
+            showDialog(entries);
+            return;
+        }
+        final WatchLaterClient client;
+        try {
+            client = new WatchLaterClient(activity);
+        } catch (final IllegalArgumentException error) {
+            Toast.makeText(activity, R.string.watch_later_invalid_url, Toast.LENGTH_SHORT).show();
+            showDialog(entries);
+            return;
+        }
+        Single.fromCallable(() -> Optional.ofNullable(client.findVideo(info.getUrl())))
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(found -> {
+                    if (fragment.isAdded() && !activity.isFinishing()) {
+                        final WatchLaterClient.Video existing = found.orElse(null);
+                        final List<StreamDialogEntry> menu = new ArrayList<>(entries);
+                        menu.add(new StreamDialogEntry(existing == null
+                                ? R.string.watch_later_add : R.string.watch_later_remove,
+                                (unusedFragment, unusedItem) -> changeWatchLater(client, existing)));
+                        showDialog(menu);
+                    }
+                }, error -> {
+                    if (fragment.isAdded() && !activity.isFinishing()) {
+                        Toast.makeText(activity, R.string.watch_later_request_failed,
+                                Toast.LENGTH_SHORT).show();
+                        showDialog(entries);
+                    }
+                });
+    }
+
+    private void changeWatchLater(final WatchLaterClient client,
+                                  final WatchLaterClient.Video existing) {
+        Completable.fromAction(() -> {
+                    if (existing == null) {
+                        client.addVideo(info.getUrl());
+                    } else {
+                        client.removeVideo(existing.id);
+                    }
+                })
+                .subscribeOn(Schedulers.io())
+                .observeOn(AndroidSchedulers.mainThread())
+                .subscribe(() -> {
+                    if (fragment.isAdded()) {
+                        Toast.makeText(activity, existing == null
+                                ? R.string.watch_later_added : R.string.watch_later_removed,
+                                Toast.LENGTH_SHORT).show();
+                        if (fragment instanceof WatchLaterFragment) {
+                            ((WatchLaterFragment) fragment).reloadContent();
+                        }
+                    }
+                }, error -> {
+                    if (fragment.isAdded()) {
+                        Toast.makeText(activity, R.string.watch_later_request_failed,
+                                Toast.LENGTH_SHORT).show();
+                    }
+                });
+    }
+
+    private void showDialog(final List<StreamDialogEntry> menu) {
+        if (fragment.getView() == null) {
+            return;
+        }
 
         // Create the dialog's title
         final View bannerView = View.inflate(activity, R.layout.dialog_title, null);
@@ -70,7 +147,7 @@ public final class InfoItemDialog {
         }
 
         // Get the entry's descriptions which are displayed in the dialog
-        final String[] items = entries.stream()
+        final String[] items = menu.stream()
                 .map(entry -> entry.getString(activity)).toArray(String[]::new);
 
         // Call an entry's action / onClick method when the entry is selected.
@@ -80,10 +157,10 @@ public final class InfoItemDialog {
                     .isAtLeast(Lifecycle.State.STARTED)) {
                 return;
             }
-            entries.get(index).action.onClick(fragment, info);
+            menu.get(index).action.onClick(fragment, info);
         };
 
-        dialog = new AlertDialog.Builder(activity)
+        final AlertDialog dialog = new AlertDialog.Builder(activity)
                 .setCustomTitle(bannerView)
                 .setItems(items, action)
                 .create();
@@ -96,10 +173,6 @@ public final class InfoItemDialog {
                 viewLifecycle.removeObserver(this);
             }
         });
-
-    }
-
-    public void show() {
         dialog.show();
     }
 

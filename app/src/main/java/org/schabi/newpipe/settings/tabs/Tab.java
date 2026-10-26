@@ -31,6 +31,7 @@ import org.schabi.newpipe.local.subscription.SubscriptionFragment;
 import org.schabi.newpipe.local.subscription.item.FeedGroupCardItem;
 import org.schabi.newpipe.util.KioskTranslator;
 import org.schabi.newpipe.util.ServiceHelper;
+import org.schabi.newpipe.watchlater.WatchLaterFragment;
 
 import java.util.Objects;
 
@@ -166,7 +167,8 @@ public abstract class Tab {
         KIOSK(new KioskTab()),
         CHANNEL(new ChannelTab()),
         PLAYLIST(new PlaylistTab()),
-        CHANNEL_GROUP(new ChannelGroupTab());
+        CHANNEL_GROUP(new ChannelGroupTab()),
+        WATCH_LATER(new WatchLaterTab());
 
         private final Tab tab;
 
@@ -281,6 +283,30 @@ public abstract class Tab {
         @Override
         public BookmarkFragment getFragment(final Context context) {
             return new BookmarkFragment();
+        }
+    }
+
+    public static class WatchLaterTab extends Tab {
+        public static final int ID = 10;
+
+        @Override
+        public int getTabId() {
+            return ID;
+        }
+
+        @Override
+        public String getTabName(final Context context) {
+            return context.getString(R.string.watch_later_title);
+        }
+
+        @Override
+        public int getTabIconRes(final Context context) {
+            return R.drawable.ic_watch_later;
+        }
+
+        @Override
+        public WatchLaterFragment getFragment(final Context context) {
+            return new WatchLaterFragment();
         }
     }
 
