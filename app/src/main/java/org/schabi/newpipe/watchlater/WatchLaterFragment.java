@@ -7,6 +7,7 @@ import android.view.ViewGroup;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 
 import org.schabi.newpipe.R;
 import org.schabi.newpipe.error.ErrorInfo;
@@ -33,12 +34,23 @@ import io.reactivex.rxjava3.schedulers.Schedulers;
 public class WatchLaterFragment extends BaseListFragment<List<StreamInfoItem>, Void> {
     private Disposable request;
     private boolean resumedOnce;
+    private SwipeRefreshLayout swipeRefreshLayout;
 
     @Override
     public View onCreateView(@NonNull final LayoutInflater inflater,
                              @Nullable final ViewGroup container,
                              @Nullable final Bundle savedInstanceState) {
-        return inflater.inflate(R.layout.fragment_kiosk, container, false);
+        final View root = inflater.inflate(R.layout.fragment_kiosk, container, false);
+        final View list = root.findViewById(R.id.items_list);
+        final ViewGroup parent = (ViewGroup) list.getParent();
+        final int index = parent.indexOfChild(list);
+        final ViewGroup.LayoutParams layoutParams = list.getLayoutParams();
+        parent.removeView(list);
+        swipeRefreshLayout = new SwipeRefreshLayout(requireContext());
+        parent.addView(swipeRefreshLayout, index, layoutParams);
+        swipeRefreshLayout.addView(list, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        return root;
     }
 
     @Override
@@ -51,6 +63,7 @@ public class WatchLaterFragment extends BaseListFragment<List<StreamInfoItem>, V
     @Override
     protected void initListeners() {
         super.initListeners();
+        swipeRefreshLayout.setOnRefreshListener(this::reloadContent);
         infoListAdapter.setOnStreamSelectedListener(new OnClickGesture<>() {
             @Override
             public void selected(final StreamInfoItem item) {
@@ -125,6 +138,7 @@ public class WatchLaterFragment extends BaseListFragment<List<StreamInfoItem>, V
 
     @Override
     public void handleResult(@NonNull final List<StreamInfoItem> videos) {
+        swipeRefreshLayout.setRefreshing(false);
         isLoading.set(false);
         super.handleResult(videos);
         infoListAdapter.clearStreamItemList();
@@ -134,6 +148,14 @@ public class WatchLaterFragment extends BaseListFragment<List<StreamInfoItem>, V
             infoListAdapter.addInfoItemList(videos);
             showListFooter(false);
         }
+    }
+
+    @Override
+    public void handleError() {
+        if (swipeRefreshLayout != null) {
+            swipeRefreshLayout.setRefreshing(false);
+        }
+        super.handleError();
     }
 
     @Override
@@ -162,6 +184,8 @@ public class WatchLaterFragment extends BaseListFragment<List<StreamInfoItem>, V
     @Override
     public void onDestroyView() {
         resumedOnce = false;
+        swipeRefreshLayout.setOnRefreshListener(null);
+        swipeRefreshLayout = null;
         if (request != null) {
             request.dispose();
             request = null;

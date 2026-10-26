@@ -17,6 +17,7 @@ import org.schabi.newpipe.player.helper.PlayerHelper
 import org.schabi.newpipe.player.seekbarpreview.SeekbarPreviewThumbnailHelper
 import org.schabi.newpipe.player.seekbarpreview.SeekbarPreviewThumbnailHolder
 import org.schabi.newpipe.util.StreamTypeUtil
+import org.schabi.newpipe.watchlater.WatchLaterClient
 import java.util.concurrent.TimeUnit.MILLISECONDS
 import java.util.function.IntSupplier
 
@@ -109,6 +110,13 @@ class PlayerProgressController(private val player: Player) : SeekBar.OnSeekBarCh
             exoPlayer.duration.toInt(),
             exoPlayer.bufferedPercentage
         )
+        if (player.isPrepared && player.isPlaying && currentItem != null
+            && !StreamTypeUtil.isLiveStream(currentItem.streamType)
+        ) {
+            WatchLaterClient.recordPlaybackProgress(
+                player.context, currentItem.url, currentProgress.toLong()
+            )
+        }
         if (player.isPrepared) {
             player.sponsorBlockController.onProgress(
                 currentProgress, isRewind, isGracedRewind, bypassSecondaryMode, isUnSkip

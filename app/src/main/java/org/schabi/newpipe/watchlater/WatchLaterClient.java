@@ -2,6 +2,7 @@ package org.schabi.newpipe.watchlater;
 
 import android.content.Context;
 import android.os.SystemClock;
+import android.util.Log;
 
 import androidx.preference.PreferenceManager;
 
@@ -16,6 +17,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
+import io.reactivex.rxjava3.schedulers.Schedulers;
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -25,14 +27,19 @@ import okhttp3.Response;
 
 /** Client for the self-hosted Watch Later API. All network methods run off the UI thread. */
 public final class WatchLaterClient {
+    private static final String TAG = "WatchLaterClient";
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
     private static final OkHttpClient HTTP = new OkHttpClient.Builder()
             .callTimeout(30, TimeUnit.SECONDS).build();
     private static final long CACHE_MAX_AGE_MS = TimeUnit.MINUTES.toMillis(2);
+    private static final long PROGRESS_INTERVAL_MS = TimeUnit.SECONDS.toMillis(30);
     private static final Object CACHE_LOCK = new Object();
+    private static final Object PROGRESS_LOCK = new Object();
     private static HttpUrl cachedUrl;
     private static List<Video> cachedVideos;
     private static long cachedAt;
+    private static String lastProgressUrl;
+    private static long lastProgressAt;
 
     private final HttpUrl videosUrl;
 
@@ -50,6 +57,37 @@ public final class WatchLaterClient {
         return !PreferenceManager.getDefaultSharedPreferences(context)
                 .getString(context.getString(R.string.watch_later_url_key), "")
                 .trim().isEmpty();
+    }
+
+    public static void recordPlaybackProgress(final Context context, final String url,
+                                              final long positionMs) {
+        if (!isConfigured(context) || positionMs < 0) {
+            return;
+        }
+        final long now = SystemClock.elapsedRealtime();
+        synchronized (PROGRESS_LOCK) {
+            if (!url.equals(lastProgressUrl)) {
+                lastProgressUrl = url;
+                lastProgressAt = now;
+                return;
+            }
+            if (now - lastProgressAt < PROGRESS_INTERVAL_MS) {
+                return;
+            }
+            lastProgressAt = now;
+        }
+        final Context appContext = context.getApplicationContext();
+        Schedulers.io().scheduleDirect(() -> {
+            try {
+                final WatchLaterClient client = new WatchLaterClient(appContext);
+                final Video video = client.findVideo(url);
+                if (video != null) {
+                    client.updateTimestamp(video.id, positionMs / 1000.0);
+                }
+            } catch (final IOException | JSONException | IllegalArgumentException error) {
+                Log.w(TAG, "Could not update Watch Later playback position", error);
+            }
+        });
     }
 
     public List<Video> getVideos() throws IOException, JSONException {
@@ -120,6 +158,17 @@ public final class WatchLaterClient {
                     cachedVideos.removeIf(video -> video.id == id);
                 }
             }
+        }
+    }
+
+    private void updateTimestamp(final long id, final double seconds)
+            throws IOException, JSONException {
+        final String body = new JSONObject().put("timestamp", seconds).toString();
+        final Request request = new Request.Builder()
+                .url(videosUrl.newBuilder().addPathSegment(Long.toString(id)).build())
+                .put(RequestBody.create(JSON, body)).build();
+        try (Response response = HTTP.newCall(request).execute()) {
+            ensureSuccess(response);
         }
     }
 
