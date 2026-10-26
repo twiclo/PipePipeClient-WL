@@ -1,6 +1,7 @@
 package org.schabi.newpipe.watchlater;
 
 import android.content.Context;
+import android.os.SystemClock;
 
 import androidx.preference.PreferenceManager;
 
@@ -27,6 +28,11 @@ public final class WatchLaterClient {
     private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
     private static final OkHttpClient HTTP = new OkHttpClient.Builder()
             .callTimeout(30, TimeUnit.SECONDS).build();
+    private static final long CACHE_MAX_AGE_MS = TimeUnit.MINUTES.toMillis(2);
+    private static final Object CACHE_LOCK = new Object();
+    private static HttpUrl cachedUrl;
+    private static List<Video> cachedVideos;
+    private static long cachedAt;
 
     private final HttpUrl videosUrl;
 
@@ -34,7 +40,7 @@ public final class WatchLaterClient {
         final String value = PreferenceManager.getDefaultSharedPreferences(context)
                 .getString(context.getString(R.string.watch_later_url_key), "").trim();
         final HttpUrl base = HttpUrl.parse(value.endsWith("/") ? value : value + "/");
-        if (base == null || !("http".equals(base.scheme()) || "https".equals(base.scheme()))) {
+        if (base == null || !"https".equals(base.scheme())) {
             throw new IllegalArgumentException(context.getString(R.string.watch_later_invalid_url));
         }
         videosUrl = base.newBuilder().addPathSegment("videos").build();
@@ -47,27 +53,37 @@ public final class WatchLaterClient {
     }
 
     public List<Video> getVideos() throws IOException, JSONException {
-        final Request request = new Request.Builder().url(videosUrl).get()
-                .header("Cache-Control", "no-cache").build();
-        try (Response response = HTTP.newCall(request).execute()) {
-            ensureSuccess(response);
-            final JSONArray array = new JSONArray(response.body().string());
-            final List<Video> videos = new ArrayList<>(array.length());
-            for (int i = 0; i < array.length(); i++) {
-                final JSONObject item = array.getJSONObject(i);
-                final JSONObject thumbnails = item.optJSONObject("thumbnails");
-                videos.add(new Video(item.getLong("video_id"),
-                        item.getString("url"), item.optString("title"),
-                        item.optString("channel"), item.optLong("duration", -1),
-                        thumbnails == null ? "" : thumbnails.optString("maxres"),
-                        item.optString("external_id")));
+        synchronized (CACHE_LOCK) {
+            selectCache();
+            final Request request = new Request.Builder().url(videosUrl).get()
+                    .header("Cache-Control", "no-cache").build();
+            try (Response response = HTTP.newCall(request).execute()) {
+                ensureSuccess(response);
+                final JSONArray array = new JSONArray(response.body().string());
+                final List<Video> videos = new ArrayList<>(array.length());
+                for (int i = 0; i < array.length(); i++) {
+                    videos.add(parseVideo(array.getJSONObject(i)));
+                }
+                cachedVideos = videos;
+                cachedAt = SystemClock.elapsedRealtime();
+                return new ArrayList<>(videos);
             }
-            return videos;
+        }
+    }
+
+    public List<Video> getCachedOrFetchVideos() throws IOException, JSONException {
+        synchronized (CACHE_LOCK) {
+            selectCache();
+            if (cachedVideos != null
+                    && SystemClock.elapsedRealtime() - cachedAt < CACHE_MAX_AGE_MS) {
+                return new ArrayList<>(cachedVideos);
+            }
+            return getVideos();
         }
     }
 
     public Video findVideo(final String url) throws IOException, JSONException {
-        for (final Video video : getVideos()) {
+        for (final Video video : getCachedOrFetchVideos()) {
             if (sameVideo(url, video)) {
                 return video;
             }
@@ -76,21 +92,58 @@ public final class WatchLaterClient {
     }
 
     public void addVideo(final String url) throws IOException, JSONException {
-        final String body = new JSONObject().put("url", url).toString();
-        final Request request = new Request.Builder().url(videosUrl)
-                .post(RequestBody.create(JSON, body)).build();
-        try (Response response = HTTP.newCall(request).execute()) {
-            ensureSuccess(response);
+        synchronized (CACHE_LOCK) {
+            selectCache();
+            final String body = new JSONObject().put("url", url).toString();
+            final Request request = new Request.Builder().url(videosUrl)
+                    .post(RequestBody.create(JSON, body)).build();
+            try (Response response = HTTP.newCall(request).execute()) {
+                ensureSuccess(response);
+                final Video added = parseVideo(new JSONObject(response.body().string()));
+                if (cachedVideos != null) {
+                    cachedVideos.removeIf(video -> video.id == added.id);
+                    cachedVideos.add(added);
+                }
+            }
         }
     }
 
     public void removeVideo(final long id) throws IOException {
-        final Request request = new Request.Builder()
-                .url(videosUrl.newBuilder().addPathSegment(Long.toString(id)).build())
-                .delete().build();
-        try (Response response = HTTP.newCall(request).execute()) {
-            ensureSuccess(response);
+        synchronized (CACHE_LOCK) {
+            selectCache();
+            final Request request = new Request.Builder()
+                    .url(videosUrl.newBuilder().addPathSegment(Long.toString(id)).build())
+                    .delete().build();
+            try (Response response = HTTP.newCall(request).execute()) {
+                ensureSuccess(response);
+                if (cachedVideos != null) {
+                    cachedVideos.removeIf(video -> video.id == id);
+                }
+            }
         }
+    }
+
+    public void invalidateCache() {
+        synchronized (CACHE_LOCK) {
+            selectCache();
+            cachedVideos = null;
+        }
+    }
+
+    private void selectCache() {
+        if (!videosUrl.equals(cachedUrl)) {
+            cachedUrl = videosUrl;
+            cachedVideos = null;
+        }
+    }
+
+    private static Video parseVideo(final JSONObject item) throws JSONException {
+        final JSONObject thumbnails = item.optJSONObject("thumbnails");
+        return new Video(item.getLong("video_id"),
+                item.getString("url"), item.optString("title"),
+                item.optString("channel"), item.optLong("duration", -1),
+                thumbnails == null ? "" : thumbnails.optString("maxres"),
+                item.optString("external_id"));
     }
 
     private static void ensureSuccess(final Response response) throws IOException {

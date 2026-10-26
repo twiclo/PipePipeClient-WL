@@ -115,10 +115,11 @@ public final class InfoItemDialog {
                                 ? R.string.watch_later_added : R.string.watch_later_removed,
                                 Toast.LENGTH_SHORT).show();
                         if (fragment instanceof WatchLaterFragment) {
-                            ((WatchLaterFragment) fragment).reloadContent();
+                            ((WatchLaterFragment) fragment).reloadFromCache();
                         }
                     }
                 }, error -> {
+                    client.invalidateCache();
                     if (fragment.isAdded()) {
                         Toast.makeText(activity, R.string.watch_later_request_failed,
                                 Toast.LENGTH_SHORT).show();

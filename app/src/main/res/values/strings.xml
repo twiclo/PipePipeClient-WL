@@ -34,8 +34,8 @@
 <string name="watch_later_title">Watch Later</string>
 <string name="watch_later_url_key" translatable="false">watch_later_url</string>
 <string name="watch_later_url_title">Watch Later server URL</string>
-<string name="watch_later_url_summary">Base URL of your Watch Later server</string>
-<string name="watch_later_invalid_url">Set a valid Watch Later server URL in Content settings</string>
+<string name="watch_later_url_summary">HTTPS base URL of your Watch Later server</string>
+<string name="watch_later_invalid_url">Set a valid HTTPS Watch Later server URL in Content settings</string>
 <string name="watch_later_add">Add to Watch Later</string>
 <string name="watch_later_remove">Remove from Watch Later</string>
 <string name="watch_later_added">Added to Watch Later</string>

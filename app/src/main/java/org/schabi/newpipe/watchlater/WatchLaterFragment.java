@@ -91,7 +91,7 @@ public class WatchLaterFragment extends BaseListFragment<List<StreamInfoItem>, V
                     "Loading Watch Later videos"));
             return;
         }
-        request = Single.fromCallable(() -> loadVideos(client))
+        request = Single.fromCallable(() -> loadVideos(client, forceLoad))
                 .subscribeOn(Schedulers.io())
                 .observeOn(AndroidSchedulers.mainThread())
                 .subscribe(this::handleResult, error -> {
@@ -101,9 +101,12 @@ public class WatchLaterFragment extends BaseListFragment<List<StreamInfoItem>, V
                 });
     }
 
-    private List<StreamInfoItem> loadVideos(final WatchLaterClient client) throws Exception {
+    private List<StreamInfoItem> loadVideos(final WatchLaterClient client,
+                                           final boolean forceLoad) throws Exception {
         final List<StreamInfoItem> result = new ArrayList<>();
-        for (final WatchLaterClient.Video video : client.getVideos()) {
+        final List<WatchLaterClient.Video> videos = forceLoad
+                ? client.getVideos() : client.getCachedOrFetchVideos();
+        for (final WatchLaterClient.Video video : videos) {
             int serviceId = -1;
             try {
                 serviceId = NewPipe.getServiceByUrl(video.url).getServiceId();
@@ -141,6 +144,10 @@ public class WatchLaterFragment extends BaseListFragment<List<StreamInfoItem>, V
     @Override
     protected boolean hasMoreItems() {
         return false;
+    }
+
+    public void reloadFromCache() {
+        startLoading(false);
     }
 
     @Override
