@@ -33,7 +33,6 @@
     <string name="controls_download_desc">Discargar le file de fluxo</string>
     <string name="default_resolution_title">Resolution predefinite</string>
     <string name="default_popup_resolution_title">Resolution predefinite del fenestra emergente</string>
-    <string name="play_with_kodi_title">Reproducer con Kodi</string>
     <string name="play_audio">Audio</string>
     <string name="light_theme_title">Clar</string>
     <string name="dark_theme_title">Obscur</string>
@@ -114,14 +113,12 @@
     <string name="msg_name">Nomine de file</string>
     <string name="msg_running">NewPipe discargante</string>
     <string name="title_activity_about">A proposito de NewPipe</string>
-    <string name="copyright" formatted="true">© %1$s per %2$s sub %3$s</string>
     <string name="tab_about">A proposito de</string>
     <string name="contribution_title">Contribuer</string>
     <string name="view_on_github">Vider in GitHub</string>
     <string name="website_title">Sito web</string>
     <string name="website_encouragement">Visita le sito web de NewPipe pro plus de informationes e novitates.</string>
     <string name="app_license_title">Licentia de NewPipe</string>
-    <string name="read_full_license">Leger le licentia</string>
     <string name="action_history">Chronologia</string>
     <string name="title_last_played">Ultime reproductiones</string>
     <string name="title_most_played">Le plus reproducite</string>

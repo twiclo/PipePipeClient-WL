@@ -35,8 +35,6 @@
     <string name="download_path_audio_dialog_title">Elixa un cartafol para descargar os audios</string>
     <string name="default_resolution_title">Resolución predeterminada</string>
     <string name="default_popup_resolution_title">Resolución predeterminada do popup</string>
-    <string name="play_with_kodi_title">Reproducir co Kodi</string>
-    <string name="kore_not_found">Quere instalar o aplicativo Kore que falta\?</string>
     <string name="play_audio">Audio</string>
     <string name="theme_title">Tema</string>
     <string name="light_theme_title">Claro</string>
@@ -189,8 +187,6 @@
     <string name="charset_most_special_characters">A maioría dos caracteres especiais</string>
     <string name="toast_no_player">Non hai ningún aplicativo instalado para reproducir este ficheiro</string>
     <string name="title_activity_about">Sobre o NewPipe</string>
-    <string name="title_licenses">Licenzas de terceiros</string>
-    <string name="copyright" formatted="true">© %1$s de %2$s, so %3$s</string>
     <string name="tab_about">Sobre</string>
     <string name="app_description">Reprodutor lixeiro e libre para Android.</string>
     <string name="contribution_title">Colaborar</string>
@@ -204,8 +200,6 @@
     <string name="privacy_policy_encouragement">O proxecto NewPipe dá moita importancia á súa privacidade. Por tanto, non recolle ningún dato sen o seu consentimento.
 \nA política de privacidade do NewPipe explica con máis detalle que datos son enviados e gardados cando envía un relatorio de erros.</string>
     <string name="app_license_title">Licenza do NewPipe</string>
-    <string name="app_license">NewPipe é un software libre copyleft: Pode usar, estudar compartir e melloralo a vontade. En concreto, pode redistribuír e / ou modificala segundo os termos da Licenza Pública Xeral GNU publicada pola Free Software Foundation, xa sexa a versión 3 da licenza, ou (na súa opción) calquera outra versión posterior.</string>
-    <string name="read_full_license">Ler a licenza</string>
     <string name="title_activity_history">Historial</string>
     <string name="action_history">Historial</string>
     <string name="delete_item_search_history">Desexa eliminar este elemento do historial de procura?</string>
@@ -521,7 +515,6 @@
     <string name="notification_scale_to_square_image_title">Escala miniatura á relación de aspecto 1:1</string>
     <string name="off">Apagado</string>
     <string name="tablet_mode_title">Modo tableta</string>
-    <string name="open_website_license">Abrir sitio Web</string>
     <string name="metadata_privacy_internal">Interno</string>
     <string name="metadata_privacy_private">Privado</string>
     <string name="metadata_privacy_public">Público</string>

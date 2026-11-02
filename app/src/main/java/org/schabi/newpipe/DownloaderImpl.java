@@ -6,7 +6,7 @@ import androidx.annotation.Nullable;
 import androidx.preference.PreferenceManager;
 import com.grack.nanojson.JsonParserException;
 import okhttp3.*;
-import org.schabi.newpipe.error.ReCaptchaActivity;
+import org.schabi.newpipe.error.ChallengeCookies;
 import org.schabi.newpipe.extractor.downloader.CancellableCall;
 import org.schabi.newpipe.extractor.downloader.Downloader;
 import org.schabi.newpipe.extractor.downloader.Request;
@@ -51,6 +51,31 @@ public final class DownloaderImpl extends Downloader {
     private static final int MAX_DNS_RETRIES = 2;
     private static final long DNS_RETRY_DELAY_MS = 500L;
 
+    /**
+     * YouTube answers an address it considers to be too busy with a redirect to its bot check page
+     * instead of the requested document. Following that redirect chain ends in a failure about
+     * too many follow-up requests after more than twenty requests which make the rate limit worse,
+     * so the redirect is turned into a rate limit answer here instead, which is reported as a
+     * captcha challenge for the requested URL.
+     */
+    private static final Interceptor BOT_CHECK_INTERCEPTOR = chain -> {
+        final okhttp3.Response response = chain.proceed(chain.request());
+        final String location = response.header("Location");
+        final HttpUrl redirect = location == null ? null
+                : response.request().url().resolve(location);
+        if (!isBotCheckUrl(redirect) && !isBotCheckUrl(response.request().url())) {
+            return response;
+        }
+        response.close();
+        return new okhttp3.Response.Builder()
+                .request(chain.request())
+                .protocol(Protocol.HTTP_1_1)
+                .code(429)
+                .message("YouTube bot check")
+                .body(ResponseBody.create(null, new byte[0]))
+                .build();
+    };
+
     private static DownloaderImpl instance;
     private final Map<String, String> mCookies;
     private final OkHttpClient client;
@@ -60,6 +85,7 @@ public final class DownloaderImpl extends Downloader {
 
     private DownloaderImpl(final OkHttpClient.Builder builder) {
         this.client = builder
+                .addNetworkInterceptor(BOT_CHECK_INTERCEPTOR)
                 .readTimeout(30, TimeUnit.SECONDS)
 //                .cache(new Cache(new File(context.getExternalCacheDir(), "okhttp"),
 //                        16 * 1024 * 1024))
@@ -81,6 +107,15 @@ public final class DownloaderImpl extends Downloader {
 
     public static DownloaderImpl getInstance() {
         return instance;
+    }
+
+    private static boolean isBotCheckUrl(@Nullable final HttpUrl url) {
+        if (url == null) {
+            return false;
+        }
+        final String host = url.host();
+        return ("google.com".equals(host) || host.endsWith(".google.com"))
+                && url.encodedPath().startsWith("/sorry");
     }
 
     public OkHttpClient getClient() {
@@ -153,18 +188,36 @@ public final class DownloaderImpl extends Downloader {
 
     public String getCookies(final String url) {
         final List<String> resultCookies = new ArrayList<>();
-        if (url.contains(YOUTUBE_DOMAIN)) {
+        if (isYoutubeUrl(url)) {
             final String youtubeCookie = getCookie(YOUTUBE_RESTRICTED_MODE_COOKIE_KEY);
             if (youtubeCookie != null) {
                 resultCookies.add(youtubeCookie);
             }
         }
-        // Recaptcha cookie is always added TODO: not sure if this is necessary
-        final String recaptchaCookie = getCookie(ReCaptchaActivity.RECAPTCHA_COOKIES_KEY);
-        if (recaptchaCookie != null) {
-            resultCookies.add(recaptchaCookie);
+        // cookies of a solved challenge, only sent back to the domain that issued them
+        final String challengeCookies = ChallengeCookies.get(url);
+        if (challengeCookies != null) {
+            resultCookies.add(challengeCookies);
         }
         return CookieUtils.concatCookies(resultCookies);
+    }
+
+    private static boolean isYoutubeUrl(final String url) {
+        final HttpUrl httpUrl = HttpUrl.parse(url);
+        if (httpUrl == null) {
+            return false;
+        }
+        final String host = httpUrl.host();
+        return host.equals(YOUTUBE_DOMAIN) || host.endsWith("." + YOUTUBE_DOMAIN);
+    }
+
+    /**
+     * @return whether the response is a challenge the user can solve in the WebView:
+     * a rate limit (YouTube/Google reCAPTCHA) or a Cloudflare challenge page
+     */
+    private static boolean isChallenge(final okhttp3.Response response) {
+        return response.code() == 429
+                || "challenge".equalsIgnoreCase(response.header("cf-mitigated"));
     }
 
     public String getCookie(final String key) {
@@ -322,7 +375,7 @@ public final class DownloaderImpl extends Downloader {
         }
 
 
-        if (response.code() == 429) {
+        if (isChallenge(response)) {
             response.close();
 
             throw new ReCaptchaException("reCaptcha Challenge requested", url);
@@ -441,7 +494,7 @@ public final class DownloaderImpl extends Downloader {
                 }
             }
         }
-        if (response.code() == 429) {
+        if (isChallenge(response)) {
             response.close();
             throw new ReCaptchaException("reCaptcha Challenge requested", url);
         }
@@ -528,7 +581,7 @@ public final class DownloaderImpl extends Downloader {
             @Override
             public void onResponse(Call call, okhttp3.Response response) throws IOException {
                 try {
-                    if (response.code() == 429) {
+                    if (isChallenge(response)) {
                         callback.onError(new ReCaptchaException("reCaptcha Challenge requested", url));
                         return;
                     }

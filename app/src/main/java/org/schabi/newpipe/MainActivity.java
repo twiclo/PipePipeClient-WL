@@ -42,6 +42,7 @@ import android.view.ViewGroup;
 import android.widget.*;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.appcompat.app.ActionBar;
 import androidx.appcompat.app.ActionBarDrawerToggle;
 import androidx.appcompat.app.AppCompatActivity;
@@ -61,10 +62,11 @@ import org.schabi.newpipe.databinding.InstanceSpinnerLayoutBinding;
 import org.schabi.newpipe.databinding.ToolbarLayoutBinding;
 import org.schabi.newpipe.error.ErrorUtil;
 import org.schabi.newpipe.extractor.NewPipe;
+import org.schabi.newpipe.extractor.ServiceInstance;
+import org.schabi.newpipe.extractor.ServiceInstances;
 import org.schabi.newpipe.extractor.StreamingService;
 import org.schabi.newpipe.extractor.exceptions.ExtractionException;
 import org.schabi.newpipe.extractor.exceptions.ReCaptchaException;
-import org.schabi.newpipe.extractor.services.peertube.PeertubeInstance;
 import org.schabi.newpipe.fragments.BackPressable;
 import org.schabi.newpipe.fragments.MainFragment;
 import org.schabi.newpipe.fragments.detail.VideoDetailFragment;
@@ -72,6 +74,7 @@ import org.schabi.newpipe.fragments.list.search.SearchFragment;
 import org.schabi.newpipe.local.feed.notifications.NotificationWorker;
 import org.schabi.newpipe.player.Player;
 import org.schabi.newpipe.player.PlayerIntentConstants;
+import org.schabi.newpipe.player.event.DetailPlayerEvents;
 import org.schabi.newpipe.player.event.OnKeyDownListener;
 import org.schabi.newpipe.player.helper.PlayerHolder;
 import org.schabi.newpipe.player.playqueue.PlayQueue;
@@ -87,7 +90,6 @@ import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Objects;
 
 import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.HttpsURLConnection;
@@ -109,7 +111,8 @@ public class MainActivity extends AppCompatActivity {
 
     private boolean servicesShown = false;
 
-    private BroadcastReceiver broadcastReceiver;
+    @Nullable
+    private DetailPlayerEvents.Listener playerStartedListener;
 
     private static final int ITEM_ID_SUBSCRIPTIONS = -1;
     private static final int ITEM_ID_FEED = -2;
@@ -146,6 +149,8 @@ public class MainActivity extends AppCompatActivity {
 
         assureCorrectAppLanguage(this);
         super.onCreate(savedInstanceState);
+        org.schabi.newpipe.cast.CastReceiver.Companion.setEnabled(this,
+                org.schabi.newpipe.cast.CastReceiver.Companion.isEnabledByUser(this));
 
         mainBinding = ActivityMainBinding.inflate(getLayoutInflater());
         drawerLayoutBinding = mainBinding.drawerLayout;
@@ -357,14 +362,21 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void changeService(final MenuItem item) {
-        drawerLayoutBinding.navigation.getMenu()
-                .getItem(ServiceHelper.getSelectedServiceId(this))
-                .setChecked(false);
+        setServiceMenuItemChecked(ServiceHelper.getSelectedServiceId(this), false);
         ServiceHelper.setSelectedServiceId(this, item.getItemId());
         SearchFragment.setPersistedSearchServiceId(this, item.getItemId());
-        drawerLayoutBinding.navigation.getMenu()
-                .getItem(ServiceHelper.getSelectedServiceId(this))
-                .setChecked(true);
+        setServiceMenuItemChecked(ServiceHelper.getSelectedServiceId(this), true);
+    }
+
+    /**
+     * Service menu items use the service id as item id. Ids are not contiguous, so they must
+     * not be used as menu positions.
+     */
+    private void setServiceMenuItemChecked(final int serviceId, final boolean checked) {
+        final MenuItem item = drawerLayoutBinding.navigation.getMenu().findItem(serviceId);
+        if (item != null && item.getGroupId() == R.id.menu_services_group) {
+            item.setChecked(checked);
+        }
     }
 
     private void tabSelected(final MenuItem item) throws ExtractionException {
@@ -456,37 +468,37 @@ public class MainActivity extends AppCompatActivity {
 
     private void showServices() {
         for (final StreamingService s : NewPipe.getServices()) {
-            final String title = s.getServiceInfo().getName()
-                    + (ServiceHelper.isBeta(s) ? " (Legacy)" : "");
+            final String title = s.getServiceInfo().getName();
 
             final MenuItem menuItem = drawerLayoutBinding.navigation.getMenu()
-                    .add(R.id.menu_services_group, s.getServiceId(), ORDER, title)
-                    .setIcon(ServiceHelper.getIcon(s.getServiceId()));
+                    .add(R.id.menu_services_group, s.getServiceId(), ORDER, title);
+            menuItem.setIcon(ServiceHelper.getIconDrawable(this, s.getServiceId()));
 
-            // peertube specifics
-            if (s.getServiceId() == 3) {
-                enhancePeertubeMenu(s, menuItem);
+            // only services that provide instances, usually plugins, get an instance selector
+            if (s instanceof ServiceInstances) {
+                enhanceInstanceMenu((ServiceInstances) s, menuItem);
             }
         }
-        drawerLayoutBinding.navigation.getMenu()
-                .getItem(ServiceHelper.getSelectedServiceId(this))
-                .setChecked(true);
+        setServiceMenuItemChecked(ServiceHelper.getSelectedServiceId(this), true);
     }
 
-    private void enhancePeertubeMenu(final StreamingService s, final MenuItem menuItem) {
-        final PeertubeInstance currentInstance = PeertubeHelper.getCurrentInstance();
-        menuItem.setTitle(currentInstance.getName() + (ServiceHelper.isBeta(s) ? " (Legacy)" : ""));
+    private void enhanceInstanceMenu(final ServiceInstances service, final MenuItem menuItem) {
+        final ServiceInstance currentInstance = service.getCurrentInstance();
+        menuItem.setTitle(currentInstance.getName());
+
         final Spinner spinner = InstanceSpinnerLayoutBinding.inflate(LayoutInflater.from(this))
                 .getRoot();
-        final List<PeertubeInstance> instances = PeertubeHelper.getInstanceList(this);
+        final List<ServiceInstance> instances = service.getInstances();
         final List<String> items = new ArrayList<>();
         int defaultSelect = 0;
-        for (final PeertubeInstance instance : instances) {
+        for (int i = 0; i < instances.size(); i++) {
+            final ServiceInstance instance = instances.get(i);
             items.add(instance.getName());
             if (instance.getUrl().equals(currentInstance.getUrl())) {
-                defaultSelect = items.size() - 1;
+                defaultSelect = i;
             }
         }
+
         final ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
                 R.layout.instance_spinner_item, items);
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
@@ -496,11 +508,11 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onItemSelected(final AdapterView<?> parent, final View view,
                                        final int position, final long id) {
-                final PeertubeInstance newInstance = instances.get(position);
-                if (newInstance.getUrl().equals(PeertubeHelper.getCurrentInstance().getUrl())) {
+                final ServiceInstance newInstance = instances.get(position);
+                if (newInstance.equals(service.getCurrentInstance())) {
                     return;
                 }
-                PeertubeHelper.selectInstance(newInstance, getApplicationContext());
+                service.selectInstance(newInstance);
                 changeService(menuItem);
                 mainBinding.getRoot().closeDrawers();
                 new Handler(Looper.getMainLooper()).postDelayed(() -> {
@@ -512,7 +524,6 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onNothingSelected(final AdapterView<?> parent) {
-
             }
         });
         menuItem.setActionView(spinner);
@@ -524,8 +535,8 @@ public class MainActivity extends AppCompatActivity {
         if (!isChangingConfigurations()) {
             StateSaver.clearStateFiles();
         }
-        if (broadcastReceiver != null) {
-            unregisterReceiver(broadcastReceiver);
+        if (playerStartedListener != null) {
+            DetailPlayerEvents.removeListener(playerStartedListener);
         }
     }
 
@@ -544,8 +555,8 @@ public class MainActivity extends AppCompatActivity {
             final String selectedServiceName = NewPipe.getService(selectedServiceId)
                     .getServiceInfo().getName();
             drawerHeaderBinding.drawerHeaderServiceView.setText(selectedServiceName);
-            drawerHeaderBinding.drawerHeaderServiceIcon.setImageResource(ServiceHelper
-                    .getIcon(selectedServiceId));
+            drawerHeaderBinding.drawerHeaderServiceIcon.setImageDrawable(ServiceHelper
+                    .getIconDrawable(this, selectedServiceId));
 
             drawerHeaderBinding.drawerHeaderServiceView.post(() -> drawerHeaderBinding
                     .drawerHeaderServiceView.setSelected(true));
@@ -852,7 +863,9 @@ public class MainActivity extends AppCompatActivity {
                                 VideoDetailFragment.KEY_SWITCHING_PLAYERS, false);
                         NavigationHelper.openVideoDetailFragment(
                                 getApplicationContext(), getSupportFragmentManager(),
-                                serviceId, url, title, playQueue, switchingPlayers);
+                                serviceId, url, title, playQueue, switchingPlayers,
+                                intent.getBooleanExtra(
+                                        VideoDetailFragment.KEY_FORCE_PLAY_FULLSCREEN, false));
                         break;
                     case CHANNEL:
                         NavigationHelper.openChannelFragment(getSupportFragmentManager(),
@@ -905,27 +918,17 @@ public class MainActivity extends AppCompatActivity {
             // if the player is already open, no need for a broadcast receiver
             openMiniPlayerIfMissing();
         } else {
-            // listen for player start intent being sent around
-            broadcastReceiver = new BroadcastReceiver() {
-                @Override
-                public void onReceive(final Context context, final Intent intent) {
-                    if (Objects.equals(intent.getAction(),
-                            VideoDetailFragment.ACTION_PLAYER_STARTED)) {
-                        openMiniPlayerIfMissing();
-                        // At this point the player is added 100%, we can unregister. Other actions
-                        // are useless since the fragment will not be removed after that.
-                        unregisterReceiver(broadcastReceiver);
-                        broadcastReceiver = null;
-                    }
+            // listen for the player being started
+            playerStartedListener = event -> {
+                if (event == DetailPlayerEvents.Event.PlayerStarted.INSTANCE) {
+                    openMiniPlayerIfMissing();
+                    // At this point the player is added 100%, we can stop listening. Other events
+                    // are useless since the fragment will not be removed after that.
+                    DetailPlayerEvents.removeListener(playerStartedListener);
+                    playerStartedListener = null;
                 }
             };
-            final IntentFilter intentFilter = new IntentFilter();
-            intentFilter.addAction(VideoDetailFragment.ACTION_PLAYER_STARTED);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                registerReceiver(broadcastReceiver, intentFilter, Context.RECEIVER_EXPORTED);
-            } else {
-                registerReceiver(broadcastReceiver, intentFilter);
-            }
+            DetailPlayerEvents.addListener(playerStartedListener);
         }
     }
 

@@ -45,6 +45,9 @@ import org.schabi.newpipe.util.NavigationHelper;
 import org.schabi.newpipe.util.OnClickGesture;
 import org.schabi.newpipe.info_list.dialog.StreamDialogDefaultEntry;
 
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -57,10 +60,13 @@ import io.reactivex.rxjava3.disposables.CompositeDisposable;
 import io.reactivex.rxjava3.disposables.Disposable;
 
 public class StatisticsPlaylistFragment
-        extends BaseLocalListFragment<List<StreamStatisticsEntry>, Void> implements BackPressable {
+        extends BaseLocalListFragment<List<StreamStatisticsEntry>, Void> implements BackPressable, HistoryDateFilterDialog.Callback {
     private final CompositeDisposable disposables = new CompositeDisposable();
     Parcelable itemsListState;
     private StatisticSortMode sortMode = StatisticSortMode.LAST_PLAYED;
+    /** Inclusive start / exclusive end of the date filter in epoch millis, or null if unset. */
+    @Nullable private Long filterStartMillis = null;
+    @Nullable private Long filterEndMillis = null;
 
     private StatisticPlaylistControlBinding headerBinding;
     private PlaylistControlBinding playlistControlBinding;
@@ -89,15 +95,31 @@ public class StatisticsPlaylistFragment
         final Comparator<StreamStatisticsEntry> comparator;
         switch (sortMode) {
             case LAST_PLAYED:
+                comparator = Comparator.comparing(StreamStatisticsEntry::getLatestAccessDate)
+                        .reversed();
+                break;
+            case LAST_PLAYED_ASC:
                 comparator = Comparator.comparing(StreamStatisticsEntry::getLatestAccessDate);
                 break;
             case MOST_PLAYED:
+                comparator = Comparator.comparingLong(StreamStatisticsEntry::getWatchCount)
+                        .reversed();
+                break;
+            case MOST_PLAYED_ASC:
                 comparator = Comparator.comparingLong(StreamStatisticsEntry::getWatchCount);
+                break;
+            case NAME_ASC:
+                comparator = (a, b) -> org.schabi.newpipe.util.utils.compareNames(
+                        a.getStreamEntity().getTitle(), b.getStreamEntity().getTitle());
+                break;
+            case NAME_DESC:
+                comparator = (a, b) -> org.schabi.newpipe.util.utils.compareNames(
+                        b.getStreamEntity().getTitle(), a.getStreamEntity().getTitle());
                 break;
             default:
                 return null;
         }
-        Collections.sort(results, comparator.reversed());
+        Collections.sort(results, comparator);
         return results;
     }
 
@@ -189,6 +211,8 @@ public class StatisticsPlaylistFragment
         } else if (item.getItemId() == R.id.action_history_clear) {
             HistorySettingsFragment
                     .openDeleteWatchHistoryDialog(requireContext(), recordManager, disposables);
+        } else if (item.getItemId() == R.id.action_history_date_filter) {
+            showDateFilterDialog();
         } else if (item.getItemId() == R.id.menu_item_sort) {
             showSortDialog();
         } else if (item.getItemId() == R.id.action_search_local) {
@@ -233,7 +257,11 @@ public class StatisticsPlaylistFragment
     @Override
     public void startLoading(final boolean forceLoad) {
         super.startLoading(forceLoad);
-        recordManager.getStreamStatistics()
+        (filterStartMillis != null || filterEndMillis != null
+                ? recordManager.getStreamStatistics(
+                        filterStartMillis != null ? filterStartMillis : 0L,
+                        filterEndMillis != null ? filterEndMillis : Long.MAX_VALUE)
+                : recordManager.getStreamStatistics())
                 .observeOn(AndroidSchedulers.mainThread())
                 .subscribe(getHistoryObserver());
     }
@@ -382,10 +410,11 @@ public class StatisticsPlaylistFragment
     //////////////////////////////////////////////////////////////////////////*/
 
     private void showSortDialog() {
-        final StatisticSortMode[] modes = {StatisticSortMode.LAST_PLAYED,
-                StatisticSortMode.MOST_PLAYED};
-        final String[] items = {getString(R.string.title_last_played),
-                getString(R.string.title_most_played)};
+        final StatisticSortMode[] modes = StatisticSortMode.values();
+        final String[] items = new String[modes.length];
+        for (int i = 0; i < modes.length; i++) {
+            items[i] = getString(sortModeTitle(modes[i]));
+        }
         new androidx.appcompat.app.AlertDialog.Builder(requireContext())
                 .setTitle(R.string.sort)
                 .setSingleChoiceItems(items, java.util.Arrays.asList(modes).indexOf(sortMode),
@@ -396,14 +425,57 @@ public class StatisticsPlaylistFragment
                 .show();
     }
 
+    private void showDateFilterDialog() {
+        final ZoneId zone = ZoneId.systemDefault();
+        final LocalDate start = filterStartMillis == null ? null
+                : Instant.ofEpochMilli(filterStartMillis).atZone(zone).toLocalDate();
+        final LocalDate end = filterEndMillis == null ? null
+                : Instant.ofEpochMilli(filterEndMillis - 1).atZone(zone).toLocalDate();
+        HistoryDateFilterDialog.newInstance(start, end)
+                .show(getChildFragmentManager(), HistoryDateFilterDialog.TAG);
+    }
+
+    @Override
+    public void onHistoryDateRangeSelected(@Nullable final LocalDate start,
+                                           @Nullable final LocalDate end) {
+        final ZoneId zone = ZoneId.systemDefault();
+        applyDateFilter(
+                start == null ? null : start.atStartOfDay(zone).toInstant().toEpochMilli(),
+                end == null ? null
+                        : end.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli());
+    }
+
+    private void applyDateFilter(@Nullable final Long start, @Nullable final Long end) {
+        filterStartMillis = start;
+        filterEndMillis = end;
+        startLoading(true);
+    }
+
     private void setSortMode(final StatisticSortMode mode) {
         if (sortMode == mode) {
             return;
         }
         sortMode = mode;
-        setTitle(getString(mode == StatisticSortMode.LAST_PLAYED
-                ? R.string.title_last_played : R.string.title_most_played));
+        setTitle(getString(sortModeTitle(mode)));
         startLoading(true);
+    }
+
+    private static int sortModeTitle(final StatisticSortMode mode) {
+        switch (mode) {
+            case LAST_PLAYED_ASC:
+                return R.string.title_last_played_ascending;
+            case MOST_PLAYED:
+                return R.string.title_most_played;
+            case MOST_PLAYED_ASC:
+                return R.string.title_most_played_ascending;
+            case NAME_ASC:
+                return R.string.sort_name_ascending;
+            case NAME_DESC:
+                return R.string.sort_name_descending;
+            case LAST_PLAYED:
+            default:
+                return R.string.title_last_played;
+        }
     }
 
     private PlayQueue getPlayQueueStartingAt(final StreamStatisticsEntry infoItem) {
@@ -570,6 +642,10 @@ public class StatisticsPlaylistFragment
 
     private enum StatisticSortMode {
         LAST_PLAYED,
+        LAST_PLAYED_ASC,
         MOST_PLAYED,
+        MOST_PLAYED_ASC,
+        NAME_ASC,
+        NAME_DESC,
     }
 }
